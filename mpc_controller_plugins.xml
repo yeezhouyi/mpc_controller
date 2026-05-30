@@ -1,0 +1,11 @@
+<library path="mpc_controller">
+  <class
+    name="mpc_controller/MPCController"
+    type="mpc_controller::MPCController"
+    base_class_type="controller_interface::ControllerInterface">
+    <description>
+      A linear MPC (Model Predictive Control) controller plugin for ros2_control.
+      Uses OSQP to solve constrained quadratic programs for trajectory tracking.
+    </description>
+  </class>
+</library>
