@@ -1,5 +1,6 @@
 # mpc_controller
 
+[![CI](https://github.com/yeezhouyi/mpc_controller/actions/workflows/ci.yml/badge.svg)](https://github.com/yeezhouyi/mpc_controller/actions/workflows/ci.yml)
 ![ROS2](https://img.shields.io/badge/ROS2-Jazzy-blue)
 ![License](https://img.shields.io/badge/license-Apache--2.0-green)
 ![Version](https://img.shields.io/badge/version-v0.2.0-orange)
