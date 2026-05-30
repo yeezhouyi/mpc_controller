@@ -57,14 +57,6 @@ ros2 topic pub /mpc_controller/reference std_msgs/msg/Float64MultiArray \
   "{data: [0.5, 0.0, -0.3, 0.0]}" --once
 ```
 
-## Diff-Drive (Placeholder)
-
-```bash
-ros2 launch mpc_controller diff_drive_mpc.launch.py
-```
-
-> **Note:** The diff-drive launch currently loads `diff_drive_base_controller` (not MPC). It serves as a skeletal example for a future MPC-on-diff-drive demo.
-
 ## Diagnostics Message Format
 
 Topic: `/mpc_controller/diagnostics` (`std_msgs/Float64MultiArray`)
