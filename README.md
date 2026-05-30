@@ -1,5 +1,9 @@
 # mpc_controller
 
+![ROS2](https://img.shields.io/badge/ROS2-Jazzy-blue)
+![License](https://img.shields.io/badge/license-Apache--2.0-green)
+![Version](https://img.shields.io/badge/version-v0.2.0-orange)
+
 A linear MPC (Model Predictive Control) plugin for `ros2_control`.
 Integrates directly with `controller_manager` and `hardware_interface`
 — a drop-in `ros2_control` controller plugin for constrained trajectory
