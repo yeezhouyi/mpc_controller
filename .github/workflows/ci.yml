@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-24.04
+    container:
+      image: ros:jazzy-ros-base
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ros-jazzy-osqp-vendor \
+            ros-jazzy-controller-interface \
+            ros-jazzy-controller-manager \
+            ros-jazzy-realtime-tools \
+            ros-jazzy-pluginlib \
+            ros-jazzy-ros2-control \
+            ros-jazzy-ament-cmake-gtest \
+            ros-jazzy-ament-lint-auto \
+            ros-jazzy-ament-lint-common \
+            libeigen3-dev
+          rm -rf /var/lib/apt/lists/*
+
+      - name: Build
+        run: |
+          . /opt/ros/jazzy/setup.sh
+          cd $GITHUB_WORKSPACE/..
+          colcon build --packages-select mpc_controller
+
+      - name: Test
+        run: |
+          . /opt/ros/jazzy/setup.sh
+          cd $GITHUB_WORKSPACE/..
+          colcon test --packages-select mpc_controller --ctest-args -R test_
+          colcon test-result --verbose
