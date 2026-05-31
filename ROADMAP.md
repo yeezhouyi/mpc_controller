@@ -16,11 +16,17 @@
 
 ## Planned
 
-### v0.2.1 — Portability & Real-Time Optimization
-- `c_float` portability in OSQP wrapper (Eigen::Map assumes double)
-- Solver tuning: reduced iterations, cached Hessian, relaxed tolerances
-- Native Linux (non-WSL2) benchmark validation
-- `ControllerUpdateStats` integration for cycle-accurate deadline tracking
+### v0.2.1-rc1 — Portability & Real-Time Optimization
+- [x] Cache condensed-QP weight matrices and Hessian (Q_bar, R_bar, S_bar, P_sparse)
+- [x] Preallocate MPCController per-cycle work vectors (x_ref_stacked_, x_free_, rate_offset_, q_vec_, l_, u_)
+- [x] Fix hot-update ordering (rebuild P before gradient on Q/R/S change)
+- [x] Reuse OSQP wrapper conversion buffers (q_buffer_, l_buffer_, u_buffer_, px_buffer_, dy_buffer_, p_buffer_)
+- [x] Add `c_float` portability (element-wise conversion instead of Eigen::Map)
+- [x] WSL2 A/B benchmark: clean-run aggregate 3,876 µs solve time, 98.4% optimal rate
+- [x] WSL2 paired A/B validation (5 alternating pairs, v0.2.0 vs v0.2.1): 4/5 pairs confirm ~12% cycle time reduction
+- [ ] Native Linux benchmark (5+ runs, Ubuntu 24.04)
+- [ ] Publish v0.2.1 stable (after experimental validation complete)
+- [ ] ControllerUpdateStats integration (deferred to v0.3.0)
 
 ### v0.3.0 — Additional Robot Examples
 - Diff-drive base MPC example

@@ -166,149 +166,60 @@ controller_interface::CallbackReturn MPCController::on_configure(
   // Build fixed QP structure: S_x, S_du, A_lin (depends only on A, B, N)
   buildQPStructure();
 
-  // Build initial weight matrices and setup the OSQP workspace once
+  // Build cached weight matrices and setup the OSQP workspace once
   // (subsequent cycles only update gradient and bounds)
+  rebuildCachedMatrices();
   const int N = params_.prediction_horizon;
-  const int n_vars = nu * N;                     // U-only variables
-  const int n_vars_total = nu * N + n_slack_;    // U + slack variables
+  const int n_vars = nu * N;
+  const int n_vars_total = n_vars + n_slack_;
 
-  Eigen::MatrixXd Q = Eigen::MatrixXd::Zero(nx, nx);
-  Eigen::MatrixXd R = Eigen::MatrixXd::Zero(nu, nu);
-  Eigen::MatrixXd S = Eigen::MatrixXd::Zero(nu, nu);
-  for (int i = 0; i < nx; ++i) Q(i, i) = params_.Q_diag[i];
-  for (int i = 0; i < nu; ++i) R(i, i) = params_.R_diag[i];
-  for (int i = 0; i < nu; ++i) S(i, i) = params_.S_diag.empty() ? 0.0 : params_.S_diag[i];
+  // Pre-allocate per-cycle work vectors (never re-allocated after configure)
+  const int n_state_rows = 2 * nx * N;
+  const int n_input_rows = n_vars;
+  const int n_rate_rows = n_vars;
+  const int n_total = n_state_rows + n_input_rows + n_rate_rows + n_slack_;
+  x_ref_stacked_.resize(nx * N);
+  x_free_.resize(nx * N);
+  rate_offset_.resize(n_vars);
+  q_vec_.resize(n_vars_total);
+  l_.resize(n_total);
+  u_.resize(n_total);
 
-  Eigen::MatrixXd Q_bar = Eigen::MatrixXd::Zero(nx * N, nx * N);
-  Eigen::MatrixXd R_bar = Eigen::MatrixXd::Zero(n_vars, n_vars);
-  Eigen::MatrixXd S_bar = Eigen::MatrixXd::Zero(n_vars, n_vars);
-  for (int k = 0; k < N; ++k) {
-    Q_bar.block(k * nx, k * nx, nx, nx) = Q;
-    R_bar.block(k * nu, k * nu, nu, nu) = R;
-    S_bar.block(k * nu, k * nu, nu, nu) = S;
-  }
-
-  // Initial gradient (q) and Hessian (P) — these get updated per cycle
-  Eigen::VectorXd x0 = Eigen::VectorXd::Zero(nx);
-  Eigen::VectorXd x_ref_stacked = Eigen::VectorXd::Zero(nx * N);  // no reference received yet
-  Eigen::VectorXd x_free = Eigen::VectorXd::Zero(nx * N);
-  // With x0=0, x_free = 0 since A_power[k+1] * 0 = 0
-
-  Eigen::VectorXd rate_offset = Eigen::VectorXd::Zero(n_vars);  // prev_u_ = 0 at start
-
-  // H = S_x^T * Q_bar * S_x + R_bar + S_du^T * S_bar * S_du
-  Eigen::MatrixXd H = S_x_.transpose() * Q_bar * S_x_ +
-                      R_bar +
-                      S_du_.transpose() * S_bar * S_du_;
-
-  // Extended Hessian with slack penalty (OSQP uses 1/2 * z^T * P * z)
-  Eigen::MatrixXd P_dense = Eigen::MatrixXd::Zero(n_vars_total, n_vars_total);
-  P_dense.topLeftCorner(n_vars, n_vars) = 2.0 * H;
+  // Build initial gradient q_vec_ (with x0=0, prev_u_=0 → x_free=0, rate_offset=0)
+  q_vec_.setZero();
   if (n_slack_ > 0) {
-    for (int i = 0; i < n_slack_; ++i) {
-      P_dense(n_vars + i, n_vars + i) = 2.0 * slack_rho_2_;
-    }
+    q_vec_.tail(n_slack_).setConstant(slack_rho_1_);
   }
 
-  // q = 2 * (S_x^T * Q_bar * (x_free - x_ref_stacked) + S_du^T * S_bar * rate_offset)
-  Eigen::RowVectorXd q_row = 2.0 * (x_free - x_ref_stacked).transpose() * Q_bar * S_x_ +
-                             2.0 * rate_offset.transpose() * S_bar * S_du_;
-  Eigen::VectorXd q = Eigen::VectorXd::Zero(n_vars_total);
-  q.head(n_vars) = q_row.transpose();
-  // Slack gradient: ρ₁ · 1 (L1 penalty, linear term)
-  if (n_slack_ > 0) {
-    q.tail(n_slack_).setConstant(slack_rho_1_);
-  }
-
-  // Build initial constraint bounds l, u
-  // A_lin was built by buildQPStructure()
-  int n_state_rows = 2 * nx * N;
-  int n_input_rows = n_vars;
-  int n_rate_rows = n_vars;
-  int n_total = n_state_rows + n_input_rows + n_rate_rows + n_slack_;
-
-  Eigen::VectorXd l_init(n_total);
-  Eigen::VectorXd u_init(n_total);
+  // Build initial constraint bounds l_, u_
   const double inf = std::numeric_limits<double>::infinity();
-
-  // State bounds: -inf ≤ S_x*z ≤ x_max_vec - x_free (with x0=0, x_free=0)
-  Eigen::VectorXd x_min_vec(nx * N);
-  Eigen::VectorXd x_max_vec(nx * N);
-  for (int k = 0; k < N; ++k) {
-    x_min_vec.segment(k * nx, nx) = Eigen::Map<const Eigen::VectorXd>(
-      params_.state_lower.data(), nx);
-    x_max_vec.segment(k * nx, nx) = Eigen::Map<const Eigen::VectorXd>(
-      params_.state_upper.data(), nx);
-  }
   for (int i = 0; i < nx * N; ++i) {
-    l_init(i) = -inf;
-    u_init(i) = x_max_vec(i);
-    l_init(nx * N + i) = -inf;
-    u_init(nx * N + i) = -x_min_vec(i);
+    int j = i % nx;
+    l_(i) = -inf;
+    u_(i) = params_.state_upper[j];
+    l_(nx * N + i) = -inf;
+    u_(nx * N + i) = -params_.state_lower[j];
   }
-
-  // Input bounds
-  Eigen::VectorXd u_min_vec(n_vars);
-  Eigen::VectorXd u_max_vec(n_vars);
   for (int k = 0; k < N; ++k) {
-    u_min_vec.segment(k * nu, nu) = Eigen::Map<const Eigen::VectorXd>(
-      params_.input_lower.data(), nu);
-    u_max_vec.segment(k * nu, nu) = Eigen::Map<const Eigen::VectorXd>(
-      params_.input_upper.data(), nu);
+    for (int i = 0; i < nu; ++i) {
+      l_(n_state_rows + k * nu + i) = params_.input_lower[i];
+      u_(n_state_rows + k * nu + i) = params_.input_upper[i];
+    }
   }
-  for (int i = 0; i < n_vars; ++i) {
-    l_init(n_state_rows + i) = u_min_vec(i);
-    u_init(n_state_rows + i) = u_max_vec(i);
-  }
-
-  // Rate bounds (initially with rate_offset = 0)
-  double dt = params_.dt;
-  Eigen::VectorXd du_min_vec(n_vars);
-  Eigen::VectorXd du_max_vec(n_vars);
   for (int k = 0; k < N; ++k) {
-    du_min_vec.segment(k * nu, nu) = dt * Eigen::Map<const Eigen::VectorXd>(
-      params_.input_rate_lower.data(), nu);
-    du_max_vec.segment(k * nu, nu) = dt * Eigen::Map<const Eigen::VectorXd>(
-      params_.input_rate_upper.data(), nu);
+    for (int i = 0; i < nu; ++i) {
+      l_(n_state_rows + n_input_rows + k * nu + i) = params_.dt * params_.input_rate_lower[i];
+      u_(n_state_rows + n_input_rows + k * nu + i) = params_.dt * params_.input_rate_upper[i];
+    }
   }
-  for (int i = 0; i < n_vars; ++i) {
-    l_init(n_state_rows + n_input_rows + i) = du_min_vec(i);
-    u_init(n_state_rows + n_input_rows + i) = du_max_vec(i);
-  }
-
-  // Slack non-negativity constraints: -ε ≤ 0 → l=-inf, u=0
   for (int i = 0; i < n_slack_; ++i) {
-    l_init(n_state_rows + n_input_rows + n_rate_rows + i) = -inf;
-    u_init(n_state_rows + n_input_rows + n_rate_rows + i) = 0.0;
+    l_(n_state_rows + n_input_rows + n_rate_rows + i) = -inf;
+    u_(n_state_rows + n_input_rows + n_rate_rows + i) = 0.0;
   }
 
-  // One-time OSQP workspace setup
-  // Build P_sparse with ALL upper-triangular entries to guarantee
-  // identical sparsity structure across updates (required by OSQP).
-  const int n_vars_total_p = n_vars + n_slack_;
-  Eigen::SparseMatrix<double> P_sparse(n_vars_total_p, n_vars_total_p);
-  {
-    std::vector<Eigen::Triplet<double>> p_triplets;
-    p_triplets.reserve(n_vars_total_p * (n_vars_total_p + 1) / 2);
-    // U block (upper triangular)
-    for (int col = 0; col < n_vars; ++col) {
-      for (int row = 0; row <= col; ++row) {
-        p_triplets.emplace_back(row, col, P_dense(row, col));
-      }
-    }
-    // Slack block (diagonal only)
-    if (n_slack_ > 0) {
-      for (int i = 0; i < n_slack_; ++i) {
-        int idx = n_vars + i;
-        p_triplets.emplace_back(idx, idx, P_dense(idx, idx));
-      }
-    }
-    P_sparse.setFromTriplets(p_triplets.begin(), p_triplets.end());
-    P_sparse.makeCompressed();
-  }
-
+  // One-time OSQP workspace setup with cached P_sparse_ and initial q/l/u
   try {
-    solver_->setupProblem(P_sparse, q, A_lin_, l_init, u_init);
+    solver_->setupProblem(P_sparse_, q_vec_, A_lin_, l_, u_);
   } catch (const std::exception & e) {
     RCLCPP_ERROR(node.get_logger(), "QP setup failed: %s", e.what());
     return controller_interface::CallbackReturn::ERROR;
@@ -518,6 +429,57 @@ void MPCController::buildQPStructure()
   A_lin_.makeCompressed();
 }
 
+void MPCController::rebuildCachedMatrices()
+{
+  const int N = params_.prediction_horizon;
+  const int nx = params_.state_dim;
+  const int nu = params_.input_dim;
+  const int n_vars = nu * N;
+  const int n_vars_total = n_vars + n_slack_;
+
+  // Build diagonal weight matrices from current parameters
+  Eigen::MatrixXd Q = Eigen::MatrixXd::Zero(nx, nx);
+  Eigen::MatrixXd R = Eigen::MatrixXd::Zero(nu, nu);
+  Eigen::MatrixXd S = Eigen::MatrixXd::Zero(nu, nu);
+  for (int i = 0; i < nx; ++i) Q(i, i) = params_.Q_diag[i];
+  for (int i = 0; i < nu; ++i) R(i, i) = params_.R_diag[i];
+  for (int i = 0; i < nu; ++i) S(i, i) = params_.S_diag.empty() ? 0.0 : params_.S_diag[i];
+
+  // Block-diagonal weight matrices over horizon
+  Q_bar_ = Eigen::MatrixXd::Zero(nx * N, nx * N);
+  R_bar_ = Eigen::MatrixXd::Zero(n_vars, n_vars);
+  S_bar_ = Eigen::MatrixXd::Zero(n_vars, n_vars);
+  for (int k = 0; k < N; ++k) {
+    Q_bar_.block(k * nx, k * nx, nx, nx) = Q;
+    R_bar_.block(k * nu, k * nu, nu, nu) = R;
+    S_bar_.block(k * nu, k * nu, nu, nu) = S;
+  }
+
+  // Condensed Hessian H = S_x^T * Q_bar * S_x + R_bar + S_du^T * S_bar * S_du
+  Eigen::MatrixXd H = S_x_.transpose() * Q_bar_ * S_x_ +
+                      R_bar_ +
+                      S_du_.transpose() * S_bar_ * S_du_;
+
+  // Build sparse P = diag(2*H, 2*rho_2*I) with upper-triangular entries
+  // guaranteeing identical sparsity pattern across updates (required by OSQP).
+  P_sparse_.resize(n_vars_total, n_vars_total);
+  std::vector<Eigen::Triplet<double>> p_triplets;
+  p_triplets.reserve(n_vars_total * (n_vars_total + 1) / 2);
+  for (int col = 0; col < n_vars; ++col) {
+    for (int row = 0; row <= col; ++row) {
+      p_triplets.emplace_back(row, col, 2.0 * H(row, col));
+    }
+  }
+  if (n_slack_ > 0) {
+    for (int i = 0; i < n_slack_; ++i) {
+      int idx = n_vars + i;
+      p_triplets.emplace_back(idx, idx, 2.0 * slack_rho_2_);
+    }
+  }
+  P_sparse_.setFromTriplets(p_triplets.begin(), p_triplets.end());
+  P_sparse_.makeCompressed();
+}
+
 // ---- Core update ----
 
 controller_interface::return_type MPCController::update(
@@ -661,171 +623,87 @@ bool MPCController::buildAndSolveQP(const Eigen::VectorXd & x0)
   const int nx = params_.state_dim;
   const int nu = params_.input_dim;
   const int n_vars = nu * N;
-  const int n_vars_total = n_vars + n_slack_;
 
-  // Reference stacked over horizon
-  Eigen::VectorXd x_ref_stacked(nx * N);
+  // Reference stacked over horizon (into pre-allocated member)
   for (int k = 0; k < N; ++k) {
-    x_ref_stacked.segment(k * nx, nx) = x_ref_;
+    x_ref_stacked_.segment(k * nx, nx) = x_ref_;
   }
 
   // Compute free response from cached A_power: x_free[k] = A^{k+1} * x0
-  Eigen::VectorXd x_free(nx * N);
   for (int k = 0; k < N; ++k) {
-    x_free.segment(k * nx, nx) = A_power_[k + 1] * x0;
+    x_free_.segment(k * nx, nx) = A_power_[k + 1] * x0;
   }
 
   // Rate offset: first step uses u_0 - u_prev
-  Eigen::VectorXd rate_offset = Eigen::VectorXd::Zero(n_vars);
-  rate_offset.head(nu) = -prev_u_;
+  rate_offset_.setZero();
+  rate_offset_.head(nu) = -prev_u_;
 
-  // Build weight matrices from current parameters
-  Eigen::MatrixXd Q = Eigen::MatrixXd::Zero(nx, nx);
-  Eigen::MatrixXd R = Eigen::MatrixXd::Zero(nu, nu);
-  Eigen::MatrixXd S = Eigen::MatrixXd::Zero(nu, nu);
-  for (int i = 0; i < nx; ++i) Q(i, i) = params_.Q_diag[i];
-  for (int i = 0; i < nu; ++i) R(i, i) = params_.R_diag[i];
-  for (int i = 0; i < nu; ++i) S(i, i) = params_.S_diag.empty() ? 0.0 : params_.S_diag[i];
-
-  // Block-diagonal weight matrices over horizon
-  Eigen::MatrixXd Q_bar = Eigen::MatrixXd::Zero(nx * N, nx * N);
-  Eigen::MatrixXd R_bar = Eigen::MatrixXd::Zero(n_vars, n_vars);
-  Eigen::MatrixXd S_bar = Eigen::MatrixXd::Zero(n_vars, n_vars);
-  for (int k = 0; k < N; ++k) {
-    Q_bar.block(k * nx, k * nx, nx, nx) = Q;
-    R_bar.block(k * nu, k * nu, nu, nu) = R;
-    S_bar.block(k * nu, k * nu, nu, nu) = S;
+  // ---- Rebuild cached matrices BEFORE gradient computation ----
+  // Ensures P and q use the same Q/R/S weights on the first cycle after a hot update.
+  if (cost_matrix_dirty_) {
+    rebuildCachedMatrices();
+    solver_->updateCostMatrix(P_sparse_);
+    cost_matrix_dirty_ = false;
   }
 
-  // ---- Build cost: P and q ----
-  // OSQP: min 1/2 * z^T * P * z + q^T * z
-  //
-  // MPC cost:
-  //   J = (S_x*z + x_free - x_ref)^T Q_bar (S_x*z + x_free - x_ref)
-  //     + z^T R_bar z
-  //     + (S_du*z + rate_offset)^T S_bar (S_du*z + rate_offset)
-  //     + ρ₁·1^T·ε + ρ₂·ε^T·ε    (soft velocity constraint slack penalty)
-  //
-  // Expanded:
-  //   J = z_U^T * H * z_U + 2 * g^T * z_U
-  //     + ρ₁·1^T·ε + ρ₂·ε^T·ε  + const
-  //   H = S_x^T Q_bar S_x + R_bar + S_du^T S_bar S_du
-  //   g = S_x^T Q_bar (x_free - x_ref) + S_du^T S_bar rate_offset
-  //
-  // OSQP needs:
-  //   P = diag(2*H, 2*ρ₂*I)
-  //   q = [2*g; ρ₁·1]
-
-  Eigen::MatrixXd H = S_x_.transpose() * Q_bar * S_x_ +
-                      R_bar +
-                      S_du_.transpose() * S_bar * S_du_;
-
-  Eigen::MatrixXd P_dense = Eigen::MatrixXd::Zero(n_vars_total, n_vars_total);
-  P_dense.topLeftCorner(n_vars, n_vars) = 2.0 * H;
+  // ---- Build cost: gradient q ----
+  // Weight matrices (Q_bar_, R_bar_, S_bar_) are cached; only gradient changes per cycle.
+  // q_U = 2 * S_x^T * Q_bar * (x_free - x_ref) + 2 * S_du^T * S_bar * rate_offset
+  // q_eps = rho_1 * 1
+  Eigen::VectorXd dx = x_free_ - x_ref_stacked_;
+  q_vec_.head(n_vars) = 2.0 * S_x_.transpose() * Q_bar_ * dx +
+                        2.0 * S_du_.transpose() * S_bar_ * rate_offset_;
   if (n_slack_ > 0) {
-    for (int i = 0; i < n_slack_; ++i) {
-      P_dense(n_vars + i, n_vars + i) = 2.0 * slack_rho_2_;
-    }
-  }
-
-  // q for U part: 2 * (S_x^T * Q_bar * (x_free - x_ref) + S_du^T * S_bar * rate_offset)
-  Eigen::VectorXd dx = x_free - x_ref_stacked;
-  Eigen::VectorXd q_vec(n_vars_total);
-  q_vec.head(n_vars) = 2.0 * S_x_.transpose() * Q_bar * dx +
-                       2.0 * S_du_.transpose() * S_bar * rate_offset;
-  // q for slack part: ρ₁ · 1 (L1 penalty)
-  if (n_slack_ > 0) {
-    q_vec.tail(n_slack_).setConstant(slack_rho_1_);
+    q_vec_.tail(n_slack_).setConstant(slack_rho_1_);
   }
 
   // ---- Build constraint bounds l, u ----
   // A_lin is fixed (built in buildQPStructure), only l and u change per cycle.
-  // State bounds are the same as before (velocity rows get slack -1 in A_lin,
-  // so bound values don't change — the slack absorbs violations).
-
-  Eigen::VectorXd x_min_vec(nx * N);
-  Eigen::VectorXd x_max_vec(nx * N);
-  for (int k = 0; k < N; ++k) {
-    x_min_vec.segment(k * nx, nx) = Eigen::Map<const Eigen::VectorXd>(
-      params_.state_lower.data(), nx);
-    x_max_vec.segment(k * nx, nx) = Eigen::Map<const Eigen::VectorXd>(
-      params_.state_upper.data(), nx);
-  }
-
-  int n_state_rows = 2 * nx * N;
-  int n_input_rows = n_vars;
-  int n_rate_rows = n_vars;
-  int n_total = n_state_rows + n_input_rows + n_rate_rows + n_slack_;
-
-  Eigen::VectorXd l(n_total);
-  Eigen::VectorXd u(n_total);
+  const int n_state_rows = 2 * nx * N;
+  const int n_input_rows = n_vars;
+  const int n_rate_rows = n_vars;
   const double inf = std::numeric_limits<double>::infinity();
 
-  // State upper: -inf ≤ S_x * z ≤ x_max - x_free
-  // State lower: -inf ≤ -S_x * z ≤ -x_min + x_free
-  // (Velocity rows also have slack -1 in A_lin, but bound values unchanged)
+  // State bounds shift with x_free each cycle
   for (int i = 0; i < nx * N; ++i) {
-    l(i) = -inf;
-    u(i) = x_max_vec(i) - x_free(i);
-
-    l(nx * N + i) = -inf;
-    u(nx * N + i) = -x_min_vec(i) + x_free(i);
+    int j = i % nx;
+    l_(i) = -inf;
+    u_(i) = params_.state_upper[j] - x_free_(i);
+    l_(nx * N + i) = -inf;
+    u_(nx * N + i) = -params_.state_lower[j] + x_free_(i);
   }
 
-  // Input bounds (fixed, same as in configure)
+  // Input bounds (constant)
   for (int k = 0; k < N; ++k) {
+    int row_base = n_state_rows + k * nu;
     for (int i = 0; i < nu; ++i) {
-      l(n_state_rows + k * nu + i) = params_.input_lower[i];
-      u(n_state_rows + k * nu + i) = params_.input_upper[i];
+      l_(row_base + i) = params_.input_lower[i];
+      u_(row_base + i) = params_.input_upper[i];
     }
   }
 
-  // Rate bounds with dt scaling: du = input_rate * dt
-  // l = du_min_vec - rate_offset, u = du_max_vec - rate_offset
+  // Rate bounds shift with rate_offset
   double dt = params_.dt;
   for (int k = 0; k < N; ++k) {
+    int row_base = n_state_rows + n_input_rows + k * nu;
     for (int i = 0; i < nu; ++i) {
-      double du_min_dt = dt * params_.input_rate_lower[i];
-      double du_max_dt = dt * params_.input_rate_upper[i];
-      l(n_state_rows + n_input_rows + k * nu + i) = du_min_dt - rate_offset(k * nu + i);
-      u(n_state_rows + n_input_rows + k * nu + i) = du_max_dt - rate_offset(k * nu + i);
+      double off = rate_offset_(k * nu + i);
+      l_(row_base + i) = dt * params_.input_rate_lower[i] - off;
+      u_(row_base + i) = dt * params_.input_rate_upper[i] - off;
     }
   }
 
-  // Slack non-negativity: -ε ≤ 0 → l=-inf, u=0
+  // Slack non-negativity: -eps <= 0 -> l=-inf, u=0
+  int slack_base = n_state_rows + n_input_rows + n_rate_rows;
   for (int i = 0; i < n_slack_; ++i) {
-    l(n_state_rows + n_input_rows + n_rate_rows + i) = -inf;
-    u(n_state_rows + n_input_rows + n_rate_rows + i) = 0.0;
+    l_(slack_base + i) = -inf;
+    u_(slack_base + i) = 0.0;
   }
 
   // ---- Update solver and solve (no re-setup) ----
   try {
-    solver_->updateGradient(q_vec);
-    solver_->updateBounds(l, u);
-
-    // Rebuild and update P only when weights have changed (cost_matrix_dirty_).
-    // Build P_sparse with ALL upper-triangular entries to guarantee identical
-    // sparsity structure (required by OSQP osqp_update_P).
-    if (cost_matrix_dirty_) {
-      Eigen::SparseMatrix<double> P_sparse(n_vars_total, n_vars_total);
-      std::vector<Eigen::Triplet<double>> p_triplets;
-      p_triplets.reserve(n_vars_total * (n_vars_total + 1) / 2);
-      // U block (upper triangular)
-      for (int col = 0; col < n_vars; ++col) {
-        for (int row = 0; row <= col; ++row) {
-          p_triplets.emplace_back(row, col, P_dense(row, col));
-        }
-      }
-      // Slack block (diagonal only)
-      for (int i = 0; i < n_slack_; ++i) {
-        int idx = n_vars + i;
-        p_triplets.emplace_back(idx, idx, P_dense(idx, idx));
-      }
-      P_sparse.setFromTriplets(p_triplets.begin(), p_triplets.end());
-      P_sparse.makeCompressed();
-      solver_->updateCostMatrix(P_sparse);
-      cost_matrix_dirty_ = false;
-    }
+    solver_->updateGradient(q_vec_);
+    solver_->updateBounds(l_, u_);
 
     return solver_->solve();
   } catch (const std::exception & e) {
@@ -834,9 +712,6 @@ bool MPCController::buildAndSolveQP(const Eigen::VectorXd & x0)
     return false;
   }
 }
-
-// ---- Helpers ----
-
 Eigen::VectorXd MPCController::readState()
 {
   Eigen::VectorXd x(params_.state_dim);

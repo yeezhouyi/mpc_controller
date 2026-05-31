@@ -175,9 +175,17 @@ public:
     data_.u = static_cast<c_float *>(std::malloc(sizeof(c_float) * static_cast<size_t>(m)));
     if (!data_.q || !data_.l || !data_.u) throw std::bad_alloc();
 
-    Eigen::Map<Eigen::VectorXd>(data_.q, n) = inst.gradient;
-    Eigen::Map<Eigen::VectorXd>(data_.l, m) = inst.lower_bounds;
-    Eigen::Map<Eigen::VectorXd>(data_.u, m) = inst.upper_bounds;
+    for (c_int i = 0; i < n; ++i) data_.q[i] = static_cast<c_float>(inst.gradient(i));
+    for (c_int i = 0; i < m; ++i) data_.l[i] = static_cast<c_float>(inst.lower_bounds(i));
+    for (c_int i = 0; i < m; ++i) data_.u[i] = static_cast<c_float>(inst.upper_bounds(i));
+
+    // Pre-allocate conversion buffers for per-cycle updates
+    q_buffer_.resize(n);
+    l_buffer_.resize(m);
+    u_buffer_.resize(m);
+    px_buffer_.resize(n);
+    dy_buffer_.resize(m);
+    p_buffer_.resize(static_cast<size_t>(inst.problem_mat.nonZeros()));
 
     // Sanitize bounds: OSQP cannot handle ±Inf, replace with large finite values
     for (c_int i = 0; i < m; ++i) {
@@ -243,7 +251,9 @@ public:
   Eigen::VectorXd GetPrimalSolution() const {
     if (!work_ || !work_->solution) return {};
     c_int n = work_->data->n;
-    return Eigen::Map<Eigen::VectorXd>(work_->solution->x, n);
+    Eigen::VectorXd result(n);
+    for (c_int i = 0; i < n; ++i) result(i) = static_cast<double>(work_->solution->x[i]);
+    return result;
   }
 
   /// Update both lower and upper bounds.
@@ -251,14 +261,13 @@ public:
   OSQPError UpdateBounds(const Eigen::VectorXd &l, const Eigen::VectorXd &u) {
     if (!work_) return OSQPError::kWorkspaceNotInitialized;
     c_int m = static_cast<c_int>(l.size());
-    std::vector<c_float> lv(m), uv(m);
-    Eigen::Map<Eigen::VectorXd>(lv.data(), m) = l;
-    Eigen::Map<Eigen::VectorXd>(uv.data(), m) = u;
     for (c_int i = 0; i < m; ++i) {
-      if (!std::isfinite(lv[i])) lv[i] = lv[i] < 0 ? -OSQP_INFTY : OSQP_INFTY;
-      if (!std::isfinite(uv[i])) uv[i] = uv[i] < 0 ? -OSQP_INFTY : OSQP_INFTY;
+      l_buffer_[i] = static_cast<c_float>(l(i));
+      u_buffer_[i] = static_cast<c_float>(u(i));
+      if (!std::isfinite(l_buffer_[i])) l_buffer_[i] = l_buffer_[i] < 0 ? -OSQP_INFTY : OSQP_INFTY;
+      if (!std::isfinite(u_buffer_[i])) u_buffer_[i] = u_buffer_[i] < 0 ? -OSQP_INFTY : OSQP_INFTY;
     }
-    c_int exitflag = osqp_update_bounds(work_, lv.data(), uv.data());
+    c_int exitflag = osqp_update_bounds(work_, l_buffer_.data(), u_buffer_.data());
     if (exitflag == 0) return OSQPError::kNoError;
     return OSQPError::kUpdateFailed;
   }
@@ -267,9 +276,8 @@ public:
   OSQPError UpdateGradient(const Eigen::VectorXd &q) {
     if (!work_) return OSQPError::kWorkspaceNotInitialized;
     c_int n = static_cast<c_int>(q.size());
-    std::vector<c_float> qv(n);
-    Eigen::Map<Eigen::VectorXd>(qv.data(), n) = q;
-    c_int exitflag = osqp_update_lin_cost(work_, qv.data());
+    for (c_int i = 0; i < n; ++i) q_buffer_[i] = static_cast<c_float>(q(i));
+    c_int exitflag = osqp_update_lin_cost(work_, q_buffer_.data());
     if (exitflag == 0) return OSQPError::kNoError;
     return OSQPError::kUpdateFailed;
   }
@@ -281,12 +289,11 @@ public:
   OSQPError UpdateP(const Eigen::SparseMatrix<double> &P_new) {
     if (!work_) return OSQPError::kWorkspaceNotInitialized;
     c_int n = static_cast<c_int>(P_new.nonZeros());
-    std::vector<c_float> Px(n);
     for (c_int i = 0; i < n; ++i) {
-      Px[i] = static_cast<c_float>(P_new.valuePtr()[i]);
+      p_buffer_[i] = static_cast<c_float>(P_new.valuePtr()[i]);
     }
     // OSQP_NULL, 0 means "update all values in storage order"
-    c_int exitflag = osqp_update_P(work_, Px.data(), OSQP_NULL, 0);
+    c_int exitflag = osqp_update_P(work_, p_buffer_.data(), OSQP_NULL, 0);
     if (exitflag == 0) return OSQPError::kNoError;
     return OSQPError::kUpdateFailed;
   }
@@ -316,10 +323,9 @@ public:
     if (!work_) return OSQPError::kWorkspaceNotInitialized;
     c_int n = static_cast<c_int>(primal.size());
     c_int m = static_cast<c_int>(dual.size());
-    std::vector<c_float> px(n), dy(m);
-    Eigen::Map<Eigen::VectorXd>(px.data(), n) = primal;
-    Eigen::Map<Eigen::VectorXd>(dy.data(), m) = dual;
-    c_int exitflag = osqp_warm_start(work_, px.data(), dy.data());
+    for (c_int i = 0; i < n; ++i) px_buffer_[i] = static_cast<c_float>(primal(i));
+    for (c_int i = 0; i < m; ++i) dy_buffer_[i] = static_cast<c_float>(dual(i));
+    c_int exitflag = osqp_warm_start(work_, px_buffer_.data(), dy_buffer_.data());
     if (exitflag == 0) return OSQPError::kNoError;
     return OSQPError::kWarmStartFailed;
   }
@@ -328,6 +334,14 @@ public:
   bool isInitialized() const { return work_ != nullptr && owns_; }
 
 private:
+  // Pre-allocated conversion buffers (c_float portability + per-cycle allocation reduction)
+  std::vector<c_float> q_buffer_;
+  std::vector<c_float> l_buffer_;
+  std::vector<c_float> u_buffer_;
+  std::vector<c_float> px_buffer_;
+  std::vector<c_float> dy_buffer_;
+  std::vector<c_float> p_buffer_;
+
   ::OSQPWorkspace *work_ = nullptr;
   bool owns_ = false;
 

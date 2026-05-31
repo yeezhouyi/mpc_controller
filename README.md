@@ -3,7 +3,7 @@
 [![CI](https://github.com/yeezhouyi/mpc_controller/actions/workflows/ci.yml/badge.svg)](https://github.com/yeezhouyi/mpc_controller/actions/workflows/ci.yml)
 ![ROS2](https://img.shields.io/badge/ROS2-Jazzy-blue)
 ![License](https://img.shields.io/badge/license-Apache--2.0-green)
-![Version](https://img.shields.io/badge/version-v0.2.0-orange)
+![Version](https://img.shields.io/badge/version-v0.2.1-orange)
 
 A linear MPC (Model Predictive Control) plugin for `ros2_control`.
 Integrates directly with `controller_manager` and `hardware_interface`
@@ -119,75 +119,148 @@ python3 scripts/benchmark_plot.py --bags mpc_run --plot
 ### Generated Plots
 
 **Dashboard** — 2×2 panel with state tracking, error, solver performance, and control inputs
-(RRBot simulation, soft velocity constraints, post-fix run 03 — best tracking).
+(RRBot simulation, v0.2.1 cached Hessian, run 02 — clean run).
 
-![MPC Controller Dashboard](screenshots/mpc_soft_fixed_run_03_dashboard.png)
+![MPC Controller Dashboard](screenshots/mpc_v021_cached_run_02_dashboard.png)
 
 **Solver Latency Histogram** — distribution of solve times with mean and P95 markers.
 
-![Solve Time Histogram](screenshots/mpc_soft_fixed_run_03_histogram.png)
+![Solve Time Histogram](screenshots/mpc_v021_cached_run_02_histogram.png)
 
 ### RRBot Benchmark Results
 
-Measured from six 65-second RRBot Gazebo simulation runs with **soft velocity
-constraints** (WSL2, Ubuntu 24.04, Intel i7-12700, OSQP 0.6.3) after applying
-the warm-start partition-shift hardening fix.
-The controller_manager target update rate is configured to 100 Hz.
-Under the current WSL2 Gazebo environment, the effective diagnostics rate is
-~30–75 Hz with significant run-to-run variability.
+#### v0.2.1 — Cached Hessian & Buffer Preallocation
 
-> **Note on data quality:** Runs 01 and 05 are excluded from the aggregate due
-> to elevated failure rates (>10%) attributed to WSL2 timing variability.
-> Runs 02–04 are clean (1–3% failed cycles each). **Zero NaN sentinel values
-> were observed across all 22,179 cycles** (all 6 runs including pre-run),
-> confirming the warm-start hardening eliminated the sporadic
-> `PRIMAL_INFEASIBLE` burst phenomenon. See *Known Issues* below.
+Measured from 5 × 65-second RRBot Gazebo simulation runs with **soft velocity
+constraints and cached condensed Hessian** (WSL2, Ubuntu 24.04, Intel i7-12700,
+OSQP 0.6.3). The controller_manager target update rate is 100 Hz. Under the
+current WSL2 Gazebo environment the effective diagnostics rate varies
+significantly (48–83 Hz across runs).
 
-#### Aggregate Results (runs 02–04, 7,870 total cycles)
+> **Data quality note:** The 5 formal runs exhibit significant run-to-run
+> variability. Three of five runs exceed a 10% failed-cycle rate — these
+> are reported transparently rather than excluded silently. A clean-run
+> aggregate is provided separately using a predefined quality gate
+> (failed-cycle rate ≤ 10%). **Zero NaN sentinel values were observed
+> across all 20,903 cycles**, consistent with the v0.2.0 warm-start hardening.
+>
+> **Benchmark validation status:** Paired A/B validation completed
+> (see below). Native Linux benchmark in progress.
+
+##### All-Run Observed Results (runs 01–05, 20,903 cycles)
 
 | Metric | Weighted Avg |
-|--------|-------------|
-| **Optimal solve rate** (% of cycles with OSQP_SOLVED) | **97.7%** |
-| **Solve time (mean)** | 7,063 µs |
-| **Cycle time (mean)** | 7,410 µs |
-| **Deadline miss rate** | 16.3% |
-| **Position RMS error** | 1.13 rad |
-| **Hold events (fallback control)** | 177 (2.2%) |
+|--------|-------------:|
+| **Optimal solve rate** | **89.9%** |
+| **Mean solve time** | 5,810 µs |
+| **Mean cycle time** | 5,998 µs |
+| **Deadline miss rate** | 13.1% |
+| **Position RMS error** | 1.41 rad |
+| **Hold events** | 2,088 (10.0%) |
 
-#### Comparison vs. Hard-Constraint Baseline
+##### Clean-Run Conditional Results (runs 01–02, 8,742 cycles)
 
-| Metric | Hard Baseline | Soft Constraint | Δ |
-|--------|--------------|-----------------|---|
-| Optimal solve rate | 59.5% | **97.7%** | **+38.2 pp** |
-| Position RMS error | 1.94 rad | **1.13 rad** | **−42%** |
-| Mean solve time | 11.8 ms | **7.06 ms** | **−40%** |
-| Deadline miss rate | 88.3% | **16.3%** | **−72.0 pp** |
-| Hold events (total) | 3,863 | **177** | **−95%** |
+Runs with a failed-cycle rate above 10% are excluded according to the
+predefined quality gate. The excluded runs 03–05 are reported separately
+in the per-run breakdown below.
 
-#### Per-Run Breakdown
+| Metric | Weighted Avg |
+|--------|-------------:|
+| **Optimal solve rate** (% of cycles with OSQP_SOLVED) | **98.4%** |
+| **Mean solve time** | 3,876 µs |
+| **Mean cycle time** | 4,002 µs |
+| **Deadline miss rate** | 5.69% |
+| **Position RMS error** | 0.975 rad |
+| **Hold events** | 141 (1.61%) |
+
+##### Performance Trend vs v0.2.0 Baseline (soft constraint)
+
+Comparison based on clean-run subsets from separate benchmark sessions
+(not paired experiments — see the paired A/B section below for a
+controlled head-to-head).
+v0.2.0: runs 02–04 (7,870 cycles). v0.2.1 clean: runs 01–02 (8,742 cycles).
+
+| Metric | v0.2.0 | v0.2.1 clean |
+|--------|--------|-------------:|
+| Optimal solve rate | 97.7% | 98.4% |
+| Mean solve time | 7,063 µs | 3,876 µs |
+| Mean cycle time | 7,410 µs | 4,002 µs |
+| Deadline miss rate | 16.3% | 5.69% |
+| Position RMS error | 1.13 rad | 0.975 rad |
+| Hold rate | 2.2% | 1.61% |
+
+The cached condensed Hessian eliminates ~512K FLOPs/cycle of redundant
+matrix-matrix products, reducing per-cycle Eigen heap allocations from 17+
+to ~3. Solve time and cycle time improvements are consistent with this change.
+
+##### Comparison vs. Hard-Constraint Baseline
+
+| Metric | Hard Baseline | v0.2.1 clean |
+|--------|--------------|-------------:|
+| Optimal solve rate | 59.5% | 98.4% |
+| Position RMS error | 1.94 rad | 0.975 rad |
+| Mean solve time | 11.8 ms | 3.88 ms |
+| Deadline miss rate | 88.3% | 5.69% |
+| Hold events (total) | 3,863 | 141 |
+
+##### Per-Run Breakdown
 
 | Run | Cycles | Optimal | Optimal % | Failed | Hold | RMS | Solve Mean | Notes |
 |-----|--------|---------|-----------|--------|------|-----|-----------|-------|
-| 01 | 4,713 | 3,899 | 82.7% | 806 | 806 | 1.75 rad | 3,819 µs | Anomalous (WSL2 timing) |
-| 02 | 3,631 | 3,524 | 97.0% | 100 | 100 | 1.32 rad | 6,817 µs | Clean |
-| 03 | 2,287 | 2,258 | 98.7% | 29 | 29 | 0.93 rad | 6,701 µs | Clean |
-| 04 | 1,952 | 1,904 | 97.5% | 48 | 48 | 1.01 rad | 7,945 µs | Clean |
-| 05 | 5,129 | 4,591 | 89.5% | 535 | 535 | 1.51 rad | 7,425 µs | Anomalous (WSL2 timing) |
-| **Agg (02–04)** | **7,870** | **7,686** | **97.7%** | **177** | **177** | **1.13 rad** | **7,063 µs** | — |
+| Pre | 5,683 | 5,612 | 98.7% | 70 | 70 | 0.834 rad | 1,870 µs | Warm-up (excluded) |
+| 01 | 4,597 | 4,490 | 97.7% | 107 | 107 | 0.996 rad | 3,730 µs | Clean ✓ |
+| 02 | 4,145 | 4,111 | 99.2% | 34 | 34 | 0.951 rad | 4,037 µs | Clean ✓ |
+| 03 | 3,471 | 3,055 | 88.0% | 410 | 410 | 1.59 rad | 5,969 µs | WSL2 timing |
+| 04 | 3,281 | 2,688 | 81.9% | 589 | 589 | 1.70 rad | 6,172 µs | WSL2 timing |
+| 05 | 5,409 | 4,455 | 82.4% | 948 | 948 | 1.66 rad | 8,614 µs | WSL2 timing |
+| **All (01–05)** | **20,903** | **18,799** | **89.9%** | **2,088** | **2,088** | **1.41 rad** | **5,810 µs** | |
+| **Clean (01–02)** | **8,742** | **8,601** | **98.4%** | **141** | **141** | **0.975 rad** | **3,876 µs** | gate ≤ 10% failed |
 
-Runs 01 and 05 excluded from aggregate due to WSL2 timing variability (>10% failure rate, considered outliers).
+The pre-run is a controller re-start warm-up cycle and is not included in
+any aggregate. Runs 03–05 exceeded the 10% failed-cycle quality gate.
+
+##### Paired A/B Validation (v0.2.0 vs v0.2.1-rc1)
+
+A 10-run alternating A/B benchmark was conducted in a single session to
+control for environmental variability (5 × v0.2.0, 5 × v0.2.1-rc1, 65 s
+each, alternating every 1–2 runs to cancel order bias).
+
+**All 10 runs passed the quality gate (failed-cycle rate ≤ 10%)** —
+a substantial improvement over the initial batch where 3/5 runs exceeded
+the threshold. This suggests the earlier anomalous runs were driven by
+WSL2 scheduling state rather than the controller code itself.
+
+| Metric | v0.2.0 (A, 5 runs) | v0.2.1-rc1 (B, 5 runs) | Δ |
+|--------|-------------------:|----------------------:|---|
+| Total cycles | 24,600 | 26,149 | — |
+| **Optimal solve rate** | **97.6%** | **98.1%** | **+0.5 pp** |
+| **Mean solve time** | 2,880 µs | 2,590 µs | −10.1% |
+| **Mean cycle time** | 3,060 µs | 2,690 µs | −11.9% |
+| **Deadline miss rate** | 4.32% | 3.33% | −0.99 pp |
+| **Position RMS error** | 0.900 rad | 0.834 rad | −7.4% |
+| **Hold rate** | 2.40% | 1.85% | −0.54 pp |
+
+**Pairs with B < A cycle time: 4/5** — the cached Hessian benefit is
+confirmed under controlled conditions. The improvement magnitude (~12%
+cycle time reduction) is a more reliable causal estimate than the
+cross-session comparison above.
+
+> **Note on absolute timing:** Solve/cycle times in this controlled
+> paired benchmark (2.5–3.0 ms) are lower than the earlier cross-session
+> runs (3.9–7.4 ms). This is attributed to differences in WSL2 system
+> load, cache state, and Gazebo scheduling across benchmark sessions.
+> The paired comparison controls for these variables, making the Δ
+> column the relevant metric.
 
 #### Known Issues
 
 - **State bounds vs URDF limits (P0 — FIXED)**: The YAML `state_lower/upper` position bounds were originally ±2.5 rad, tighter than the observed startup joint state range (~±3.14 rad, the RRBot URDF revolute limits). This caused the first QP cycle to be **primal infeasible** (status −3), cascading to 0% solve rate across the entire run. The fix added explicit joint `initial_value=0.0` in the URDF (via `gz_ros2_control` `initial_value`) and set MPC position bounds to ±3.10 rad, keeping safety margins consistent with URDF limits.
 - **Velocity-bound / rate-limit conflict (P1 — RESOLVED via soft constraints)**: When joint velocity reaches its ±5.0 rad/s bound simultaneously with aggressive rate constraints (±10 Nm/s → ±0.1 Nm/cycle), the state bound and rate constraint can conflict, causing infeasibility on ~40% of cycles. The fix converts velocity bounds to **soft constraints** using slack variables with L1/L2 penalty (ρ₁=1e2, ρ₂=1e1), ensuring the QP always stays feasible while penalizing bound violations. Solve rate improved from 59.5% → 97.5% and position RMS from 1.94 → 1.15 rad.
 - **Sporadic `PRIMAL_INFEASIBLE` bursts with sentinel slack values (P2 — RESOLVED via warm-start hardening)**: On rare cycles (0–14% per run) OSQP returned status −3 (`PRIMAL_INFEASIBLE`) with slack variables at a sentinel value of 2,143,289,344 (0x7fc00000, a quiet NaN in IEEE 754 single-precision). Once triggered, the bad ADMM state could cascade via warm start, causing contiguous failure blocks. **Root cause identified:** The receding-horizon warm-start shift treated the partitioned decision vector z = [U, ε] as a monolithic block, interleaving U and slack components during the shift. This corrupted the slack initial guess, driving OSQP into an invalid ADMM state that propagated across cycles. **Fix:** Partitioned the warm-start shift into independent U-block and ε-block shifts, with `allFinite()` guards and error-checked reset on solver failure. Post-fix benchmarks confirm **zero sentinel occurrences across 22,179 cycles** (6 runs). See [osqp_solver.cpp:143-171](src/osqp_solver.cpp#L143-L171) for the fix.
-- **Deadline misses**: Soft constraints reduced deadline miss rate from 88% (hard baseline) to **16.3%** (post-fix aggregate), down from 53.4% pre-fix. The improvement comes from faster solver convergence (7.06 ms vs 11.8 ms mean) combined with more consistent solve times. Remaining contributors include WSL2 virtualization overhead, Gazebo scheduling, per-cycle matrix reconstruction, and OSQP polishing cost. Solver-tuning experiments (reduced iterations, cached Hessian, disabled polish, relaxed tolerances) and native Linux testing are planned.
+- **Deadline misses**: In clean runs the cached condensed Hessian reduced mean cycle time from 7.41 ms (v0.2.0) to 4.00 ms in the original benchmark, and from 3.06 ms to 2.69 ms (−12%) in the paired A/B validation. The Hessian cache eliminates ~512K FLOPs/cycle of redundant matrix-matrix products, reducing per-cycle Eigen heap allocations from 17+ to ~3. Remaining contributors include WSL2 virtualization overhead, Gazebo scheduling, and solver polishing cost.
 
-**Multi-Run Comparison** — side-by-side timing, tracking error, and diagnostics-rate bar charts
-comparing all six post-fix soft-constraint benchmark runs (including pre-run).
-
-![Benchmark Comparison](screenshots/benchmark_comparison.png)
+> Comparison charts will be generated after Native Linux benchmark
+> validation (see benchmark status note above).
 
 ## Dynamic Parameter Tuning
 

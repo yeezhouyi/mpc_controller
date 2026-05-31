@@ -5,3 +5,4 @@ __pycache__/
 *.pyc
 test/test_osqp_c_api
 .claude/
+records/

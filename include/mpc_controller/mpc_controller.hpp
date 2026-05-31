@@ -45,6 +45,9 @@ protected:
   /// Called once during on_configure().
   void buildQPStructure();
 
+  /// Rebuild cached weight matrices and sparse Hessian when Q/R/S change.
+  void rebuildCachedMatrices();
+
   /// Build per-cycle cost and constraints, update solver, and solve.
   /// @param x0  Current state (read once in update() and passed down).
   bool buildAndSolveQP(const Eigen::VectorXd & x0);
@@ -101,6 +104,20 @@ protected:
   Eigen::MatrixXd S_du_;          // (nu*N × nu*N) input-difference matrix
   Eigen::SparseMatrix<double> A_lin_;  // sparse linear constraint matrix
   std::vector<Eigen::MatrixXd> A_power_;  // A^i for i = 0..N
+
+  // --- Cached weight matrices (rebuilt only on Q/R/S change) ---
+  Eigen::MatrixXd Q_bar_;
+  Eigen::MatrixXd R_bar_;
+  Eigen::MatrixXd S_bar_;
+  Eigen::SparseMatrix<double> P_sparse_;
+
+  // --- Pre-allocated per-cycle work vectors ---
+  Eigen::VectorXd x_ref_stacked_;
+  Eigen::VectorXd x_free_;
+  Eigen::VectorXd rate_offset_;
+  Eigen::VectorXd q_vec_;
+  Eigen::VectorXd l_;
+  Eigen::VectorXd u_;
 };
 
 }  // namespace mpc_controller
