@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## v0.2.1-rc1 (2026-05-31)
+## v0.2.1 (2026-05-31)
 
 ### Performance
 - Cache condensed-QP weight matrices and Hessian.
@@ -10,11 +10,6 @@ All notable changes to this project will be documented in this file.
 - Preallocate MPCController per-cycle work vectors.
 - Reduce controller-layer Eigen heap allocations from 17+ to ~3 per cycle.
 - Reuse OSQP wrapper conversion buffers (q, l, u, primal, dual, P).
-- **Benchmark results:** Paired A/B (5 alternating pairs) confirms
-  cached Hessian cycle time reduction: 3.06 ms → 2.69 ms (−12%, 4/5
-  pairs show improvement). All 10 runs passed the ≤10% failed-cycle
-  quality gate. See README for dual-reporting with cross-session and
-  paired data.
 
 ### Fixed
 - Q/R/S hot-update ordering: rebuild P before gradient computation to ensure
@@ -26,6 +21,12 @@ All notable changes to this project will be documented in this file.
 - osqp++.h: pre-allocated `q_buffer_`, `l_buffer_`, `u_buffer_`, `px_buffer_`,
   `dy_buffer_` replace per-cycle `std::vector` allocations in UpdateBounds,
   UpdateGradient, and SetPrimalDualWarmStart.
+
+### Benchmark
+- WSL2 paired A/B validation (10 runs, 5 alternating pairs) confirms
+  ~12% cycle time reduction: v0.2.0 3.06 ms → v0.2.1 2.69 ms (4/5 pairs
+  show improvement). All 10 runs passed the ≤10% failed-cycle quality gate.
+- Native Linux characterization deferred to v0.2.2.
 
 ## v0.2.0 (2026-05-30)
 

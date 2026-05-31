@@ -219,19 +219,15 @@ to ~3. Solve time and cycle time improvements are consistent with this change.
 The pre-run is a controller re-start warm-up cycle and is not included in
 any aggregate. Runs 03–05 exceeded the 10% failed-cycle quality gate.
 
-##### Paired A/B Validation (v0.2.0 vs v0.2.1-rc1)
+##### Paired A/B Validation (v0.2.0 vs v0.2.1)
 
-A 10-run alternating A/B benchmark was conducted in a single session to
-control for environmental variability (5 × v0.2.0, 5 × v0.2.1-rc1, 65 s
-each, alternating every 1–2 runs to cancel order bias).
+A 10-run alternating A/B benchmark was conducted in a single WSL2 session
+to control for environmental variability (5 × v0.2.0, 5 × v0.2.1, 65 s
+each, alternating every 1–2 runs to cancel order bias). **All 10 runs
+passed the quality gate (failed-cycle rate ≤ 10%)**.
 
-**All 10 runs passed the quality gate (failed-cycle rate ≤ 10%)** —
-a substantial improvement over the initial batch where 3/5 runs exceeded
-the threshold. This suggests the earlier anomalous runs were driven by
-WSL2 scheduling state rather than the controller code itself.
-
-| Metric | v0.2.0 (A, 5 runs) | v0.2.1-rc1 (B, 5 runs) | Δ |
-|--------|-------------------:|----------------------:|---|
+| Metric | v0.2.0 (A, 5 runs) | v0.2.1 (B, 5 runs) | Δ |
+|--------|-------------------:|-------------------:|---|
 | Total cycles | 24,600 | 26,149 | — |
 | **Optimal solve rate** | **97.6%** | **98.1%** | **+0.5 pp** |
 | **Mean solve time** | 2,880 µs | 2,590 µs | −10.1% |
@@ -241,16 +237,14 @@ WSL2 scheduling state rather than the controller code itself.
 | **Hold rate** | 2.40% | 1.85% | −0.54 pp |
 
 **Pairs with B < A cycle time: 4/5** — the cached Hessian benefit is
-confirmed under controlled conditions. The improvement magnitude (~12%
-cycle time reduction) is a more reliable causal estimate than the
-cross-session comparison above.
+confirmed under controlled conditions.
 
-> **Note on absolute timing:** Solve/cycle times in this controlled
-> paired benchmark (2.5–3.0 ms) are lower than the earlier cross-session
-> runs (3.9–7.4 ms). This is attributed to differences in WSL2 system
-> load, cache state, and Gazebo scheduling across benchmark sessions.
-> The paired comparison controls for these variables, making the Δ
-> column the relevant metric.
+> **Validation scope:** This benchmark was conducted under WSL2
+> (Ubuntu 24.04 on Windows) and should not be interpreted as a hard
+> real-time guarantee. The controlled paired design isolates the
+> relative improvement of v0.2.1 changes from environmental factors.
+> Native Linux characterization remains planned as a future work item
+> (see [ROADMAP](ROADMAP.md)).
 
 #### Known Issues
 
@@ -258,9 +252,6 @@ cross-session comparison above.
 - **Velocity-bound / rate-limit conflict (P1 — RESOLVED via soft constraints)**: When joint velocity reaches its ±5.0 rad/s bound simultaneously with aggressive rate constraints (±10 Nm/s → ±0.1 Nm/cycle), the state bound and rate constraint can conflict, causing infeasibility on ~40% of cycles. The fix converts velocity bounds to **soft constraints** using slack variables with L1/L2 penalty (ρ₁=1e2, ρ₂=1e1), ensuring the QP always stays feasible while penalizing bound violations. Solve rate improved from 59.5% → 97.5% and position RMS from 1.94 → 1.15 rad.
 - **Sporadic `PRIMAL_INFEASIBLE` bursts with sentinel slack values (P2 — RESOLVED via warm-start hardening)**: On rare cycles (0–14% per run) OSQP returned status −3 (`PRIMAL_INFEASIBLE`) with slack variables at a sentinel value of 2,143,289,344 (0x7fc00000, a quiet NaN in IEEE 754 single-precision). Once triggered, the bad ADMM state could cascade via warm start, causing contiguous failure blocks. **Root cause identified:** The receding-horizon warm-start shift treated the partitioned decision vector z = [U, ε] as a monolithic block, interleaving U and slack components during the shift. This corrupted the slack initial guess, driving OSQP into an invalid ADMM state that propagated across cycles. **Fix:** Partitioned the warm-start shift into independent U-block and ε-block shifts, with `allFinite()` guards and error-checked reset on solver failure. Post-fix benchmarks confirm **zero sentinel occurrences across 22,179 cycles** (6 runs). See [osqp_solver.cpp:143-171](src/osqp_solver.cpp#L143-L171) for the fix.
 - **Deadline misses**: In clean runs the cached condensed Hessian reduced mean cycle time from 7.41 ms (v0.2.0) to 4.00 ms in the original benchmark, and from 3.06 ms to 2.69 ms (−12%) in the paired A/B validation. The Hessian cache eliminates ~512K FLOPs/cycle of redundant matrix-matrix products, reducing per-cycle Eigen heap allocations from 17+ to ~3. Remaining contributors include WSL2 virtualization overhead, Gazebo scheduling, and solver polishing cost.
-
-> Comparison charts will be generated after Native Linux benchmark
-> validation (see benchmark status note above).
 
 ## Dynamic Parameter Tuning
 
