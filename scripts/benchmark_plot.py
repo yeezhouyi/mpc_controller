@@ -896,6 +896,93 @@ def print_report(all_metrics: list):
 
 
 # ---------------------------------------------------------------------------
+# Repeated-run summary
+# ---------------------------------------------------------------------------
+
+def print_summary(all_metrics: list):
+    """Print aggregated statistics across multiple benchmark runs.
+
+    Shows weighted averages and cross-run variability (std, min, max)
+    for key metrics.
+    """
+    if len(all_metrics) < 2:
+        print("  (Need 2+ runs for cross-run summary)")
+        return
+
+    total_steps = sum(m.get("total_steps", 0) for m in all_metrics)
+    if total_steps == 0:
+        return
+
+    def wmean(key):
+        return sum(m.get("total_steps", 0) * m.get(key, 0)
+                   for m in all_metrics) / total_steps
+
+    def across_runs(key):
+        vals = [m.get(key, 0) for m in all_metrics if key in m]
+        if not vals:
+            return None
+        arr = np.array(vals)
+        return {
+            "mean": float(np.mean(arr)),
+            "std": float(np.std(arr)),
+            "min": float(np.min(arr)),
+            "max": float(np.max(arr)),
+        }
+
+    print("\n" + "=" * 85)
+    print(f"  REPEATED-RUN SUMMARY ({len(all_metrics)} runs, {total_steps:,} total cycles)")
+    print("=" * 85)
+
+    # Weighted averages (cycle-time weighted by run length)
+    weighted_metrics = [
+        ("solve_time_mean_us", "Solve time mean"),
+        ("solve_time_p95_us", "Solve time P95"),
+        ("solve_time_p99_us", "Solve time P99"),
+        ("cycle_time_mean_us", "Cycle time mean"),
+        ("cycle_time_p95_us", "Cycle time P95"),
+        ("cycle_time_p99_us", "Cycle time P99"),
+        ("optimal_rate_pct", "Optimal solve rate"),
+        ("deadline_miss_pct", "Deadline miss rate"),
+        ("position_rms_error", "Position RMS error"),
+        ("hold_rate_pct", "Hold rate"),
+    ]
+
+    print(f"\n  {'Metric':<30} {'Weighted':>12} {'Run σ':>10} {'Min':>12} {'Max':>12}")
+    print("  " + "-" * 76)
+
+    for key, label in weighted_metrics:
+        wm = wmean(key)
+        ar = across_runs(key)
+        if ar is None:
+            continue
+        # Format based on metric type
+        if "pct" in key:
+            fmt = lambda v: f"{v:.2f}%"
+        elif "rad" in key or "error" in key:
+            fmt = lambda v: f"{v:.3f} rad"
+        elif "us" in key:
+            fmt = lambda v: f"{v:.0f} µs" if v < 1000 else f"{v/1000:.2f} ms"
+        else:
+            fmt = lambda v: f"{v:.4f}"
+
+        print(f"  {label:<30} {fmt(wm):>12} {fmt(ar['std']):>10} "
+              f"{fmt(ar['min']):>12} {fmt(ar['max']):>12}")
+
+    # Per-run opt rate
+    print(f"\n  Per-run optimal solve rates:")
+    for m in all_metrics:
+        name = m.get("name", "?")
+        opt = m.get("optimal_rate_pct", 0)
+        steps = m.get("total_steps", 0)
+        dl = m.get("deadline_miss_pct", 0)
+        print(f"    {name:<25} {opt:>6.1f}%  ({steps:>5} cycles, "
+              f"DL miss {dl:.1f}%)")
+
+    print("\n" + "=" * 85)
+    print()
+
+
+# ---------------------------------------------------------------------------
 # CSV / JSON export
 # ---------------------------------------------------------------------------
 
@@ -1027,6 +1114,8 @@ def main():
                         help="Export metrics to CSV (one row per run)")
     parser.add_argument("--json", action="store_true",
                         help="Export metrics to JSON with cross-run summary")
+    parser.add_argument("--summary", action="store_true",
+                        help="Print repeated-run aggregated statistics (2+ bags)")
     parser.add_argument("--demo", action="store_true",
                         help="Run in demo mode with simulated data (no rosbag)")
     args = parser.parse_args()
@@ -1079,6 +1168,9 @@ def main():
         sys.exit(1)
 
     print_report(all_metrics)
+
+    if args.summary and len(all_metrics) >= 2:
+        print_summary(all_metrics)
 
     if args.csv:
         export_csv(all_metrics, output_dir)

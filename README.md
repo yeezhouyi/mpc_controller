@@ -253,6 +253,37 @@ confirmed under controlled conditions.
 - **Sporadic `PRIMAL_INFEASIBLE` bursts with sentinel slack values (P2 — RESOLVED via warm-start hardening)**: On rare cycles (0–14% per run) OSQP returned status −3 (`PRIMAL_INFEASIBLE`) with slack variables at a sentinel value of 2,143,289,344 (0x7fc00000, a quiet NaN in IEEE 754 single-precision). Once triggered, the bad ADMM state could cascade via warm start, causing contiguous failure blocks. **Root cause identified:** The receding-horizon warm-start shift treated the partitioned decision vector z = [U, ε] as a monolithic block, interleaving U and slack components during the shift. This corrupted the slack initial guess, driving OSQP into an invalid ADMM state that propagated across cycles. **Fix:** Partitioned the warm-start shift into independent U-block and ε-block shifts, with `allFinite()` guards and error-checked reset on solver failure. Post-fix benchmarks confirm **zero sentinel occurrences across 22,179 cycles** (6 runs). See [osqp_solver.cpp:143-171](src/osqp_solver.cpp#L143-L171) for the fix.
 - **Deadline misses**: In clean runs the cached condensed Hessian reduced mean cycle time from 7.41 ms (v0.2.0) to 4.00 ms in the original benchmark, and from 3.06 ms to 2.69 ms (−12%) in the paired A/B validation. The Hessian cache eliminates ~512K FLOPs/cycle of redundant matrix-matrix products, reducing per-cycle Eigen heap allocations from 17+ to ~3. Remaining contributors include WSL2 virtualization overhead, Gazebo scheduling, and solver polishing cost.
 
+### Reproducing the Benchmark
+
+Prerequisites: ROS 2 Jazzy, Gazebo (gz_ros2_control), `rosbag2_py`, `numpy`, `matplotlib`.
+
+```bash
+# 1. Build
+source /opt/ros/jazzy/setup.bash
+cd ros2_ws && colcon build --packages-select mpc_controller
+source install/setup.bash
+
+# 2. Record a single run (60s)
+ros2 launch mpc_controller rrbot_mpc.launch.py &
+sleep 60  # wait for simulation to stabilize
+ros2 bag record /mpc_controller/diagnostics -o bench_run_01
+kill %1
+
+# 3. Analyze
+python3 src/mpc_controller/scripts/benchmark_plot.py \
+  --bags bench_run_01 --output results --plot --csv --json
+
+# 4. Multi-run summary (2+ runs)
+python3 src/mpc_controller/scripts/benchmark_plot.py \
+  --bags bench_run_01 bench_run_02 bench_run_03 \
+  --output results --summary --csv --json
+```
+
+The `--csv` flag exports a spreadsheet-friendly table (one row per run). The
+`--json` flag exports per-run details plus a weighted cross-run summary.
+The `--summary` flag prints aggregated statistics with cross-run standard
+deviation when 2+ bags are provided.
+
 ## Dynamic Parameter Tuning
 
 Weights can be updated at runtime without restarting the controller.
