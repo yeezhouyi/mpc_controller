@@ -35,8 +35,11 @@ Usage:
   # Generate report + publication-quality plots
   python3 scripts/benchmark_plot.py --bags mpc_run --plot
 
+  # Export metrics to CSV / JSON
+  python3 scripts/benchmark_plot.py --bags mpc_run --csv --json
+
   # Demo mode (no rosbag needed)
-  python3 scripts/benchmark_plot.py --demo --plot
+  python3 scripts/benchmark_plot.py --demo --plot --csv
 """
 
 import argparse
@@ -467,7 +470,11 @@ def compute_metrics(data: dict, name: str) -> dict:
     ct = data["cycle_time_us"]
     if ct.max() > 0:
         metrics["cycle_time_mean_us"] = float(np.mean(ct))
+        metrics["cycle_time_median_us"] = float(np.median(ct))
+        metrics["cycle_time_p95_us"] = float(np.percentile(ct, 95))
+        metrics["cycle_time_p99_us"] = float(np.percentile(ct, 99))
         metrics["cycle_time_max_us"] = float(np.max(ct))
+        metrics["cycle_time_std_us"] = float(np.std(ct))
 
     su = data["setup_time_us"]
     if su.max() > 0:
@@ -862,7 +869,10 @@ def print_report(all_metrics: list):
         if key.endswith("_error") or key in (
             "solve_time_mean_us", "solve_time_p95_us", "solve_time_max_us",
             "solve_time_median_us", "solve_time_std_us",
-            "cycle_time_mean_us", "setup_time_mean_us",
+            "cycle_time_mean_us", "cycle_time_median_us",
+            "cycle_time_p95_us", "cycle_time_p99_us",
+            "cycle_time_max_us", "cycle_time_std_us",
+            "setup_time_mean_us",
             "diagnostics_rate_hz", "duration_s", "total_steps",
             "solved_steps", "solve_failures", "position_rms_error",
             "optimal_steps", "approximate_steps", "failed_steps",
@@ -886,6 +896,117 @@ def print_report(all_metrics: list):
 
 
 # ---------------------------------------------------------------------------
+# CSV / JSON export
+# ---------------------------------------------------------------------------
+
+# Metrics to export (order matters for CSV columns)
+EXPORT_KEYS = [
+    "name", "duration_s", "total_steps", "state_dim",
+    "solve_time_mean_us", "solve_time_median_us",
+    "solve_time_p95_us", "solve_time_p99_us",
+    "solve_time_max_us", "solve_time_std_us",
+    "cycle_time_mean_us", "cycle_time_median_us",
+    "cycle_time_p95_us", "cycle_time_p99_us",
+    "cycle_time_max_us", "cycle_time_std_us",
+    "setup_time_mean_us",
+    "optimal_steps", "approximate_steps", "failed_steps",
+    "optimal_rate_pct", "approximate_rate_pct",
+    "solve_failures", "solved_steps",
+    "hold_count", "hold_rate_pct",
+    "deadline_misses", "deadline_miss_pct",
+    "position_rms_error",
+    "diagnostics_rate_hz",
+    "slack_max_vel_mean", "slack_max_vel_max",
+    "slack_l1_mean", "slack_l1_max", "slack_active_pct",
+]
+
+
+def export_csv(all_metrics: list, output_dir: str):
+    """Export benchmark metrics to CSV (one row per run)."""
+    import csv
+
+    # Collect all keys that appear in any metrics dict
+    all_keys = []
+    for key in EXPORT_KEYS:
+        if any(key in m for m in all_metrics):
+            all_keys.append(key)
+    # Add any extra keys not in EXPORT_KEYS
+    seen = set(all_keys)
+    for m in all_metrics:
+        for k in m:
+            if k not in seen:
+                all_keys.append(k)
+                seen.add(k)
+
+    fname = Path(output_dir) / "benchmark_results.csv"
+    with open(fname, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=all_keys, extrasaction="ignore")
+        writer.writeheader()
+        for m in all_metrics:
+            row = {k: m.get(k, "") for k in all_keys}
+            writer.writerow(row)
+
+    print(f"  CSV saved to {fname}")
+
+
+def export_json(all_metrics: list, all_data: list, output_dir: str):
+    """Export benchmark metrics to JSON with full details."""
+    import json
+
+    result = {
+        "runs": [],
+        "summary": {},
+    }
+
+    for m in all_metrics:
+        # Flatten numpy types for JSON serialization
+        clean = {}
+        for k, v in m.items():
+            if isinstance(v, (np.integer,)):
+                clean[k] = int(v)
+            elif isinstance(v, (np.floating,)):
+                clean[k] = float(v)
+            elif isinstance(v, np.ndarray):
+                clean[k] = v.tolist()
+            else:
+                clean[k] = v
+        result["runs"].append(clean)
+
+    # Cross-run summary (weighted averages)
+    total_steps = sum(m.get("total_steps", 0) for m in all_metrics)
+    if total_steps > 0:
+        ws = lambda key: sum(
+            m.get("total_steps", 0) * m.get(key, 0) for m in all_metrics
+        ) / total_steps
+
+        result["summary"] = {
+            "total_steps": total_steps,
+            "num_runs": len(all_metrics),
+            "weighted_solve_time_mean_us": ws("solve_time_mean_us"),
+            "weighted_solve_time_p95_us": ws("solve_time_p95_us"),
+            "weighted_solve_time_p99_us": ws("solve_time_p99_us"),
+            "weighted_cycle_time_mean_us": ws("cycle_time_mean_us"),
+            "weighted_cycle_time_p95_us": ws("cycle_time_p95_us"),
+            "weighted_cycle_time_p99_us": ws("cycle_time_p99_us"),
+            "weighted_optimal_rate_pct": ws("optimal_rate_pct"),
+            "weighted_deadline_miss_pct": ws("deadline_miss_pct"),
+            "weighted_position_rms_error": ws("position_rms_error"),
+        }
+        # Clean numpy types
+        for k, v in result["summary"].items():
+            if isinstance(v, (np.integer,)):
+                result["summary"][k] = int(v)
+            elif isinstance(v, (np.floating,)):
+                result["summary"][k] = float(v)
+
+    fname = Path(output_dir) / "benchmark_results.json"
+    with open(fname, "w") as f:
+        json.dump(result, f, indent=2)
+
+    print(f"  JSON saved to {fname}")
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -902,6 +1023,10 @@ def main():
                         help="Output directory for plots (default: results/)")
     parser.add_argument("--plot", action="store_true",
                         help="Generate publication-quality plots")
+    parser.add_argument("--csv", action="store_true",
+                        help="Export metrics to CSV (one row per run)")
+    parser.add_argument("--json", action="store_true",
+                        help="Export metrics to JSON with cross-run summary")
     parser.add_argument("--demo", action="store_true",
                         help="Run in demo mode with simulated data (no rosbag)")
     args = parser.parse_args()
@@ -954,6 +1079,11 @@ def main():
         sys.exit(1)
 
     print_report(all_metrics)
+
+    if args.csv:
+        export_csv(all_metrics, output_dir)
+    if args.json:
+        export_json(all_metrics, all_data, output_dir)
 
     if args.plot or args.demo or not args.bags:
         args.plot = True
