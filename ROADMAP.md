@@ -25,11 +25,14 @@
 ## Planned
 
 ### v0.2.2 — Runtime Characterization
-- [ ] Native Ubuntu 24.04 benchmark (5+ runs)
-- [ ] P95 / P99 latency reporting
+- [ ] Collect native Ubuntu 24.04 benchmark results ([#1](https://github.com/yeezhouyi/mpc_controller/issues/1))
+- [ ] Add P95 / P99 latency statistics
+- [ ] Add repeated-run benchmark summary
+- [ ] Export benchmark results to CSV / JSON
+- [ ] Update README benchmark table with native results
+- [ ] Document WSL2 vs native Linux timing limitations
 - [ ] ControllerUpdateStats integration
 - [ ] Additional solver parameter tuning
-- [ ] Regenerate comparison charts with consolidated data
 
 ### v0.3.0 — Additional Robot Examples
 - Diff-drive base MPC example

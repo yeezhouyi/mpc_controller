@@ -145,7 +145,7 @@ significantly (48–83 Hz across runs).
 > across all 20,903 cycles**, consistent with the v0.2.0 warm-start hardening.
 >
 > **Benchmark validation status:** Paired A/B validation completed
-> (see below). Native Linux benchmark in progress.
+> (see below). Native Linux benchmark validation is tracked in [#1](https://github.com/yeezhouyi/mpc_controller/issues/1).
 
 ##### All-Run Observed Results (runs 01–05, 20,903 cycles)
 
@@ -243,8 +243,8 @@ confirmed under controlled conditions.
 > (Ubuntu 24.04 on Windows) and should not be interpreted as a hard
 > real-time guarantee. The controlled paired design isolates the
 > relative improvement of v0.2.1 changes from environmental factors.
-> Native Linux characterization remains planned as a future work item
-> (see [ROADMAP](ROADMAP.md)).
+> Native Linux characterization is tracked in [#1](https://github.com/yeezhouyi/mpc_controller/issues/1)
+> and planned for v0.2.2 (see [ROADMAP](ROADMAP.md)).
 
 #### Known Issues
 
