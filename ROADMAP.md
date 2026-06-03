@@ -26,9 +26,10 @@
 
 ### v0.2.2 — Runtime Characterization
 - [ ] Collect native Ubuntu 24.04 benchmark results ([#1](https://github.com/yeezhouyi/mpc_controller/issues/1))
-- [ ] Add P95 / P99 latency statistics
-- [ ] Add repeated-run benchmark summary
-- [ ] Export benchmark results to CSV / JSON
+- [x] Add P95 / P99 latency statistics
+- [x] Add repeated-run benchmark summary
+- [x] Export benchmark results to CSV / JSON
+- [x] Add benchmark reproduction guide
 - [ ] Update README benchmark table with native results
 - [ ] Document WSL2 vs native Linux timing limitations
 - [ ] ControllerUpdateStats integration
