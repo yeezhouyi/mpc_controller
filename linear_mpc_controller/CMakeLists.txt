@@ -49,8 +49,8 @@ if(ament_cmake_FOUND)
 
   add_executable(linear_mpc_node ros2/linear_mpc_node.cpp ros2/trajectory_adapter.cpp)
   target_include_directories(linear_mpc_node PRIVATE include ros2)
-  target_link_libraries(linear_mpc_node PUBLIC linear_mpc_core)
   ament_target_dependencies(linear_mpc_node rclcpp rclcpp_lifecycle std_msgs nav_msgs geometry_msgs)
+  target_link_libraries(linear_mpc_node linear_mpc_core)
   install(TARGETS linear_mpc_node DESTINATION lib/${PROJECT_NAME})
 
   add_executable(velocity_arbiter_node ros2/velocity_arbiter.cpp)

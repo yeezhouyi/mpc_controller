@@ -21,7 +21,7 @@
 #include "nav_msgs/msg/path.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_lifecycle/lifecycle_node.hpp"
-#include "ros2/trajectory_adapter.hpp"
+#include "trajectory_adapter.hpp"
 #include "std_msgs/msg/float64_multi_array.hpp"
 
 namespace linear_mpc_controller
