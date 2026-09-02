@@ -11,11 +11,11 @@
 | **审计** | `docs/baseline_audit.md`：冻结 v0.2.1 基线，逐条给出与计划的差距（G1–G9）与保留/重构结论 | ✅ |
 | **数学** | `docs/mpc_model_derivation.md`：Frenet 误差、解析线性化、ZOH 离散化、condensed QP、回退梯子、指标定义 | ✅ |
 | **接口契约** | `docs/ros2_interface_contract.md`：topics/frames/QoS/补全规则/健康状态/单写者 | ✅ |
-| **Python 参考核心** | `mpc_core/`：frenet / model / qp(自研稠密 ADMM) / mpc / fallback / episode | ✅ 本机 45+ 测试全绿 |
+| **Python 参考核心** | `mpc_core/`：frenet / model / qp(自研稠密 ADMM) / mpc / fallback / episode | ✅ 本机 50 测试全绿 |
 | **轨迹工具** | `trajectory_tools/`：直线/圆/S/U-turn 生成器 + 位姿补全曲率/速度 | ✅ |
-| **基准工具** | `benchmark_tools/`：RMSE/p95/max + QP 统计 + run manifest | ✅ 基线见下 |
-| **C++/Eigen 核心** | `include/ src/`（model/mpc/safety，U2–U4 结构） | 🕐 按计划写好，**WSL2 colcon 编译/测试门槛未跑**（本机无工具链） |
-| **ROS2 层** | `ros2/`（linear_mpc_node / trajectory_adapter / velocity_arbiter）+ launch/config/worlds + `test/test_ros_contract.py` | 🕐 源码骨架 + 结构契约测试绿；**Gazebo 闭环待 WSL2** |
+| **基准工具** | `benchmark_tools/`：RMSE/p95/max + QP 统计 + run manifest | ✅ 1-run 与 5-run 基线见下 |
+| **C++/Eigen 核心** | `include/ src/ test/`（model/mpc/safety，U2–U4 结构） | ✅ **已在 WSL2（Ubuntu 24.04）cmake 编译 + ctest 100% 通过** |
+| **ROS2 层** | `ros2/`（linear_mpc_node / trajectory_adapter / velocity_arbiter）+ launch/config/worlds + `test/test_ros_contract.py` | ✅ **WSL2 colcon 编译通过，双节点冒烟运行正常**；结构契约测试绿；**Gazebo 闭环待办** |
 | **RL 环境** | `mpc_rl_env/`：fast env（观测/残差动作/安全投影/奖励/终止/随机化）+ PPO 训练入口 + config | 🕐 契约/奖励/投影测试绿；**训练需 torch+SB3 环境** |
 | **系统辨识** | `system_identification/`：一阶滞后 + 延迟拟合（独立验证集） | ✅ 测试绿 |
 
@@ -47,23 +47,27 @@ python benchmark_tools/scripts/run_reference_benchmark.py --runs 1 --outdir outp
 
 依赖：numpy、pyyaml、pytest（均无第三方 QP 库需求；求解器为自带稠密 ADMM）。
 
-## WSL2 / ROS2 门槛（待办，与计划 C2→C5 对齐）
+## WSL2 / ROS2 门槛（进展 2026-09-02）
 
 ```bash
-# 1) ROS-free C++ 核心（仅 Eigen）
-cmake -S . -B build && cmake --build build && ctest --test-dir build
-# 2) ROS2 包
+# 1) ROS-free C++ 核心（仅 Eigen）—— ✅ 已验证
+cmake -S . -B build_core -DBUILD_TESTING=ON && cmake --build build_core && ctest --test-dir build_core
+#    -> Ubuntu 24.04 + g++ 13: build OK, 4/4 core tests pass
+# 2) ROS2 包 —— ✅ 已验证（colcon build + 双节点冒烟运行 5 s 正常）
 colcon build --packages-select linear_mpc_controller
+ros2 pkg executables linear_mpc_controller   # linear_mpc_node, velocity_arbiter_node
+# 3) Gazebo 闭环 —— ⏳ 待办（需在 WSL2 组合 tb3/diff-drive 仿真 world + 轨迹源，
+#    并完成无轨迹 30 s 零速 / 故障回退等 C3 验收项）
 ros2 launch linear_mpc_controller linear_mpc_sim.launch.py \
     world:=tracking_empty.sdf headless:=True use_sim_time:=True
-# 3) RL 训练（需 torch/SB3/gymnasium）
+# 4) RL 训练（需 torch/SB3/gymnasium）
 python mpc_rl_env/algorithms/train_ppo_residual.py --seed 0
 ```
 
 ## 诚实边界（不冒充完成）
 
-- 本机（Windows）没有 C++ 工具链/Eigen/OSQP：C++ 核心与 ROS2 节点**未在本机编译运行**，
-  数学一致性以 Python 参考核心测试背书；编译/闭环/5-run 门槛在 WSL2 完成前不算验收通过。
+- C++/Eigen 核心与 ROS2 节点**已在 WSL2（Ubuntu 24.04 / ROS2 Jazzy）编译通过并冒烟运行**；
+  **Gazebo 闭环仿真、5-run 正式基准、RL 训练/Sim2Sim 尚未完成**（属 C3–C11 验收项）。
 - 无真实底盘：系统辨识结论限定在模型/仿真域（Sim2Sim），不声称实机部署（计划 R25/DoD）。
 - 碰撞安全门依赖 costmap/collision-monitor 接口，未接通前不宣称碰撞约束投影（KTD12）。
 - 软约束放宽、Pure Pursuit/PID 对照、SAC、探索路径接入（U11）为后续单元。

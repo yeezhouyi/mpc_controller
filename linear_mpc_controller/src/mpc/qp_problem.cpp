@@ -74,7 +74,7 @@ int CondensedMpcProblem::build(const Eigen::Vector4d & x0, Eigen::MatrixXd & H,
   G.block<4, 2>(0, 0) = B_d_[0];
   for (int k = 1; k < N; ++k) {
     F.block<4, 4>(4 * k, 0) = A_d_[k] * F.block<4, 4>(4 * (k - 1), 0);
-    G.block<4, 2 * k>(4 * k, 0) = A_d_[k] * G.block<4, 2 * k>(4 * (k - 1), 0);
+    G.block(4 * k, 0, 4, 2 * k) = A_d_[k] * G.block(4 * (k - 1), 0, 4, 2 * k);
     G.block<4, 2>(4 * k, 2 * k) = B_d_[k];
   }
 

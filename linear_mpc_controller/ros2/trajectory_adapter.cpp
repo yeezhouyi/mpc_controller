@@ -1,4 +1,4 @@
-#include "ros2/trajectory_adapter.hpp"
+#include "trajectory_adapter.hpp"
 
 #include <algorithm>
 #include <cmath>
