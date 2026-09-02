@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## linear_mpc_controller (2026-09-02) — advancement work-in-progress
+
+See `linear_mpc_controller/README.md` for the full status matrix.  Summary:
+
+- U1/C0 audit of the v0.2.1 baseline (`docs/baseline_audit.md`).
+- New differential-drive trajectory-tracking package `linear_mpc_controller/`:
+  - ROS-free **Python reference core** (`mpc_core/`): Frenet error model,
+    analytic LTV linearisation + ZOH discretisation, condensed-QP receding
+    horizon MPC with a self-contained dense ADMM solver, health/fallback
+    contract (critical states -> zero, QP failure -> deterministic
+    degrade-to-stop), offline episode runner; 45+ pytest cases green.
+  - Trajectory tools (straight/circle/S/u-turn + pose-only completion),
+    benchmark metrics/manifest tooling with an archived reference-core
+    baseline (`results/ref_core_baseline`), fast residual-RL environment
+    (`mpc_rl_env`) and first-order-lag system identification
+    (`system_identification`).
+  - C++/Eigen core and ROS2 node/launch/config skeletons written to plan;
+    compile + Gazebo gates pending WSL2 (no toolchain on the dev host).
+- Status: pure linear MPC tracking baseline works offline on the four formal
+  tracks with zero QP failures; residual-RL training and Gazebo closed-loop
+  are staged next units (C3/C6-C8).
+
 ## v0.2.1 (2026-05-31)
 
 ### Performance
