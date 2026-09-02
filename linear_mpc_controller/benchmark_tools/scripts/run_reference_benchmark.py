@@ -129,6 +129,33 @@ def main() -> None:
         "|---|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     md_lines += [format_metrics_md(m) for m in all_metrics]
+
+    # per-track aggregation across runs (R23: median + p95 over the runs)
+    if args.runs > 1:
+        md_lines += ["", "### Per-track aggregation over runs", "",
+                     "| track | e_y_rms med | e_y_rms p95(runs) | e_y_p95 med | qp_fail total | completed |",
+                     "|---|---|---|---|---|---|"]
+        for track_name in tracks:
+            ms = [m for m in all_metrics if m["track"] == track_name]
+            ey = np.array([m["e_y_rms"] for m in ms])
+            p95 = np.array([m["e_y_p95"] for m in ms])
+            qpf = sum(m["qp_failures"] for m in ms)
+            done = sum(1 for m in ms if m["completed"])
+            md_lines.append(
+                f"| {track_name} | {np.median(ey):.4f} | {np.percentile(ey, 95):.4f} | "
+                f"{np.median(p95):.4f} | {qpf} | {done}/{len(ms)} |")
+        manifest["aggregates"] = {
+            t: {
+                "e_y_rms_median": float(np.median([m["e_y_rms"] for m in all_metrics if m["track"] == t])),
+                "e_y_rms_p95_across_runs": float(np.percentile(
+                    [m["e_y_rms"] for m in all_metrics if m["track"] == t], 95)),
+                "completed": sum(1 for m in all_metrics if m["track"] == t and m["completed"]),
+            }
+            for t in tracks
+        }
+        with open(os.path.join(outdir, "run_manifest.json"), "w", encoding="utf-8") as f:
+            json.dump(manifest, f, indent=2, ensure_ascii=False)
+
     md_path = os.path.join(outdir, "benchmark_results.md")
     with open(md_path, "w", encoding="utf-8") as f:
         f.write("\n".join(md_lines) + "\n")
