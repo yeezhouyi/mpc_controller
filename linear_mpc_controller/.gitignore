@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+
+# Build artifacts (ROS2 / ament / cmake)
+build/
+install/
+log/
+colcon_*
+CMakeCache.txt
+CMakeFiles/
+*.o
+*.a
+*.so
+
+# Benchmark / experiment outputs (keep manifests only if committed explicitly)
+outputs/
+bench_results/
+*.rosbag
+*.mcap
+__pytest_artifacts__/
+
+# OS
+.DS_Store
+Thumbs.db
