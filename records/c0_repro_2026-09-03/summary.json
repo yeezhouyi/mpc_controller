@@ -1,0 +1,17 @@
+{
+  "messages": 1597,
+  "duration_s": 25.2,
+  "diag_rate_hz": 63.4,
+  "solved_rate": 0.9768,
+  "approximate_rate": 0.0,
+  "solve_time_us_mean": 2586.9,
+  "solve_time_us_p95": 5183.4,
+  "solve_time_us_max": 29043.0,
+  "deadline_miss_rate": 0.0394,
+  "hold_count": 37,
+  "status_hist": {
+    "-2": 31,
+    "1": 1560,
+    "2": 6
+  }
+}
