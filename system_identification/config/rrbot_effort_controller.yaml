@@ -1,0 +1,19 @@
+# RRBot identification effort controller (C3).
+#
+# Replaces the MPC controller for the identification session: a plain
+# forward effort controller lets the excitation node write tau directly
+# (single command writer per session).
+controller_manager:
+  ros__parameters:
+    update_rate: 100  # Hz
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    fwd_effort_controller:
+      type: forward_command_controller/ForwardCommandController
+
+fwd_effort_controller:
+  ros__parameters:
+    joints: [joint1, joint2]
+    interface_name: effort
