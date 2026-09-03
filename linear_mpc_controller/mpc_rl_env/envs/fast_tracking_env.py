@@ -33,6 +33,14 @@ ACTION_DW_MAX = 0.50   # rad/s per step at full action
 class ResidualTrackingEnv:
     """Fast env: identical discrete model family as the MPC core."""
 
+    @classmethod
+    def for_track(cls, track: str = "circle", **kw):
+        """Build an env for one of the four benchmark tracks by name."""
+        from trajectory_tools.reference_trajectory import generate_benchmark_tracks
+
+        traj = generate_benchmark_tracks()[track]
+        return cls(traj, **kw)
+
     def __init__(
         self,
         traj: Trajectory,

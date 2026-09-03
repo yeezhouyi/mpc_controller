@@ -30,21 +30,18 @@ def load_config(path: str) -> dict:
 
 
 def build_env(cfg: dict, seed: int, track: str):
-    from mpc_rl_env.envs.fast_tracking_env import ResidualTrackingEnv
+    from mpc_rl_env.envs.gym_env import GymResidualTrackingEnv
 
-    tracks = generate_benchmark_tracks()
-    traj = tracks[track]
     rw = cfg["reward_weights"]
     from mpc_rl_env.envs.reward import RewardWeights
 
-    env = ResidualTrackingEnv(
-        traj,
+    return GymResidualTrackingEnv(
+        track=track,
         mpc_params=MpcParams(N=25),
         reward_w=RewardWeights(**rw),
         alpha_residual=cfg["alpha_residual"],
         difficulty=cfg["env"]["difficulty"],
     )
-    return env
 
 
 def main() -> None:
@@ -60,7 +57,7 @@ def main() -> None:
     env = build_env(cfg, args.seed, args.track)
 
     try:
-        import gymnasium as gym  # noqa: F401
+        import gymnasium  # noqa: F401
         from stable_baselines3 import PPO
         from stable_baselines3.common.env_util import make_vec_env
     except ImportError as e:  # pragma: no cover - env-specific
@@ -69,6 +66,8 @@ def main() -> None:
         sys.exit(2)
 
     def wrap():
+        import gymnasium as gym
+
         return gym.wrappers.TimeLimit(env, max_episode_steps=cfg["env"]["max_episode_steps"])
 
     vec = make_vec_env(wrap, n_envs=1, seed=args.seed)
