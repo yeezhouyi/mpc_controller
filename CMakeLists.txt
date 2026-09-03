@@ -56,6 +56,18 @@ if(BUILD_TESTING)
   ament_add_gtest(test_mpc_controller test/mpc_controller_test.cpp)
   target_link_libraries(test_mpc_controller mpc_controller)
   target_include_directories(test_mpc_controller PRIVATE include include/3rdparty)
+
+  ament_add_gtest(test_linear_model test/test_linear_model.cpp)
+  target_link_libraries(test_linear_model mpc_controller)
+  target_include_directories(test_linear_model PRIVATE include include/3rdparty)
+
+  ament_add_gtest(test_qp_status_and_fallback test/test_qp_status_and_fallback.cpp)
+  target_link_libraries(test_qp_status_and_fallback mpc_controller)
+  target_include_directories(test_qp_status_and_fallback PRIVATE include include/3rdparty)
+
+  ament_add_gtest(test_reference_validation test/test_reference_validation.cpp)
+  target_link_libraries(test_reference_validation mpc_controller)
+  target_include_directories(test_reference_validation PRIVATE include include/3rdparty)
 endif()
 
 # ---- Linters ----
