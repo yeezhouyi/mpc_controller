@@ -103,24 +103,30 @@ TEST(TestLinearModel, RejectsDimensionMismatch)
   EXPECT_TRUE(throwsInvalidArgument([&]() {model.initialize(params);}));
 }
 
-TEST(TestLinearModel, ZeroInputKeepsStateConstant)
+TEST(TestLinearModel, ZeroInputFreeResponse)
 {
   const auto params = rrbotParams();
   LinearModel model;
   model.initialize(params);
 
+  // x0 = [q, v, q, v].  With u = 0 the double integrator keeps velocity
+  // constant and integrates position linearly: q(k) = q0 + dt*k*v0.
+  const double q0 = 0.3;
+  const double v0 = 0.5;
   Eigen::VectorXd x0(4);
-  x0 << 0.3, 0.5, -0.2, -1.0;
+  x0 << q0, v0, -0.2, -1.0;
   Eigen::VectorXd u_seq = Eigen::VectorXd::Zero(2 * 5);  // N = 5, u = 0
   const auto X = model.predict(x0, u_seq);
 
   EXPECT_EQ(X.rows(), 4);
   EXPECT_EQ(X.cols(), 6);
   for (int k = 0; k < X.cols(); ++k) {
-    EXPECT_NEAR(X(0, k), x0(0), 1e-12);
-    EXPECT_NEAR(X(1, k), x0(1), 1e-12);
-    EXPECT_NEAR(X(2, k), x0(2), 1e-12);
-    EXPECT_NEAR(X(3, k), x0(3), 1e-12);
+    // Velocities stay constant.
+    EXPECT_NEAR(X(1, k), v0, 1e-12);
+    EXPECT_NEAR(X(3, k), -1.0, 1e-12);
+    // Positions integrate velocity linearly.
+    EXPECT_NEAR(X(0, k), q0 + params.dt * k * v0, 1e-12);
+    EXPECT_NEAR(X(2, k), -0.2 + params.dt * k * (-1.0), 1e-12);
   }
 }
 
