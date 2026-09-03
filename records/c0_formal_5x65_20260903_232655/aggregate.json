@@ -1,0 +1,75 @@
+{
+ "run1": {
+  "messages": 4414,
+  "duration_s": 67.1,
+  "rate_hz": 65.8,
+  "solved_rate": 0.9764,
+  "status": {
+   "-2": 89,
+   "1": 4310,
+   "2": 15
+  },
+  "solve_mean_us": 2195.0,
+  "solve_p95_us": 5258.7,
+  "solve_max_us": 24374.0,
+  "deadline_miss_rate": 0.0392,
+  "hold": 104
+ },
+ "run2": {
+  "messages": 3142,
+  "duration_s": 66.8,
+  "rate_hz": 47.0,
+  "solved_rate": 0.9997,
+  "status": {
+   "-2": 1,
+   "1": 3141
+  },
+  "solve_mean_us": 4520.4,
+  "solve_p95_us": 8816.5,
+  "solve_max_us": 24146.0,
+  "deadline_miss_rate": 0.2467,
+  "hold": 1
+ },
+ "run3": {
+  "messages": 1047,
+  "duration_s": 23.8,
+  "rate_hz": 44.0,
+  "solved_rate": 1.0,
+  "status": {
+   "1": 1047
+  },
+  "solve_mean_us": 4381.3,
+  "solve_p95_us": 8662.6,
+  "solve_max_us": 25702.0,
+  "deadline_miss_rate": 0.3343,
+  "hold": 0
+ },
+ "run4": {
+  "messages": 4321,
+  "duration_s": 68.1,
+  "rate_hz": 63.5,
+  "solved_rate": 0.978,
+  "status": {
+   "-2": 77,
+   "1": 4226,
+   "2": 18
+  },
+  "solve_mean_us": 2345.6,
+  "solve_p95_us": 4902.0,
+  "solve_max_us": 28234.0,
+  "deadline_miss_rate": 0.0414,
+  "hold": 94
+ },
+ "run5": {
+  "messages": 0,
+  "duration_s": NaN,
+  "rate_hz": NaN,
+  "solved_rate": null,
+  "status": {},
+  "solve_mean_us": null,
+  "solve_p95_us": null,
+  "solve_max_us": null,
+  "deadline_miss_rate": null,
+  "hold": 0
+ }
+}
