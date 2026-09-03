@@ -56,6 +56,10 @@ if(BUILD_TESTING)
   ament_add_gtest(test_mpc_controller test/mpc_controller_test.cpp)
   target_link_libraries(test_mpc_controller mpc_controller)
   target_include_directories(test_mpc_controller PRIVATE include include/3rdparty)
+
+  ament_add_gtest(test_linear_model test/test_linear_model.cpp)
+  target_link_libraries(test_linear_model mpc_controller)
+  target_include_directories(test_linear_model PRIVATE include include/3rdparty)
 endif()
 
 # ---- Linters ----
